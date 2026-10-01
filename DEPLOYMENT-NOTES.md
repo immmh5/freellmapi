@@ -13,6 +13,55 @@ ENCRYPTION_KEY (64-char hex, encrypts your stored provider API keys at rest):
 If this key is lost, every provider key already stored in the dashboard becomes
 undecryptable. If it is changed, the same applies. Back this up somewhere safe.
 
+## Admin account (created)
+
+  URL:      https://freellmapi-4khz.onrender.com
+  Email:    admin@freellmapi.local
+  Password: Fr33LLM-Admin-2026!
+
+The one-time setup code has been consumed, so this account now owns the
+dashboard. Change the password from the dashboard if you want a different one.
+
+## Unified API key (use this in your tools)
+
+  freellmapi-88414600f1f70c36fc13dbea368b3216c2ad6ee5f9655af5
+
+This is the single key every OpenAI-compatible client uses against this
+gateway. It is visible in the dashboard (the masked "Current unified key") and
+can be regenerated from Settings if it leaks.
+
+## NEXT STEP YOU MUST DO — add provider keys
+
+The gateway is live with 253 models in its catalog, but it cannot answer a
+single request yet because no provider API keys are configured. Error you get
+until you add one:
+
+  "No candidate model has a configured, usable provider key..."
+
+Add free-tier keys from the providers you have accounts with — Google, Groq,
+Cerebras, Mistral, OpenRouter, Cohere, Z.ai, NVIDIA, HuggingFace, Cloudflare,
+etc. — on the dashboard's Keys page. Every key you add unlocks the models that
+provider serves and its free-tier quota; the router stacks them.
+
+## DeepSeek Harness (DSH) route — already wired
+
+A provider route named `freellmapi` was added to ~/.dsh/settings.yaml pointing
+at this gateway:
+
+    llm-pi-ai.providers.freellmapi:
+      displayName: FreeLLMAPI (Render)
+      apiKeyEnv: FREELLMAPI_API_KEY
+      baseURL: https://freellmapi-4khz.onrender.com/v1
+
+The key lives in ~/.dsh/.env (0600). Models registered so far: auto, fusion,
+deepseek-v4-pro-0813, deepseek-v4-flash-0731, gemini-3.7-flash, glm-5.3,
+kimi-k3, qwen3.8-2.4t-a95b. The default model was left on atria3 — pick
+freellmapi from the model picker when you want to route through the gateway.
+
+This mirrors exactly what `npx freellmapi setup-dsh --url
+https://freellmapi-4khz.onrender.com` writes, and matches the "DeepSeek
+Harness" entry on the dashboard's Coding agents page.
+
 ## How the automatic updates work (two layers)
 
 1. GitHub Action "Sync upstream" (in the fork at
