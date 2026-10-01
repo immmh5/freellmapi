@@ -1,0 +1,96 @@
+name: Sync upstream
+
+# Keeps this fork up to date with tashfeenahmed/freellmapi.
+# Every merged update lands on `main`, and Render's auto-deploy then rebuilds
+# the service automatically — no manual intervention needed.
+#
+# Triggers:
+#   - schedule: runs automatically at the times below (UTC)
+#   - workflow_dispatch: run it manually from the Actions tab ("Run workflow")
+#   - push to sync-upstream branch: re-run after editing this file
+on:
+  schedule:
+    # Every day at 00:00 and 12:00 UTC
+    - cron: '0 0 * * *'
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force a sync even when already up to date (rerender commit)'
+        required: false
+        default: 'false'
+
+# The job pushes to the repo, so it needs its own token with write access.
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream
+        run: git remote add upstream https://github.com/tashfeenahmed/freellmapi.git
+
+      - name: Fetch upstream
+        run: git fetch upstream --tags
+
+      - name: Check for updates
+        id: check
+        run: |
+          LOCAL=$(git rev-parse HEAD)
+          UPSTREAM=$(git rev-parse upstream/main)
+          echo "local=$LOCAL"
+          echo "upstream=$UPSTREAM"
+          if [ "$LOCAL" = "$UPSTREAM" ]; then
+            if [ "${{ github.event.inputs.force }}" = "true" ]; then
+              echo "Already up to date, but force=true — pushing an empty commit to trigger a Render rebuild."
+              echo "needs_update=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "Already up to date. Nothing to do."
+              echo "needs_update=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "Upstream has new commits. Syncing."
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge upstream into main
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          set -e
+          # Merge upstream main. Use a merge commit so the fork keeps its own
+          # history (render.yaml, this workflow) while pulling in upstream changes.
+          git merge upstream/main --no-edit -m "chore(sync): merge upstream tashfeenahmed/freellmapi@$(git rev-parse --short upstream/main)"
+          # Keep the fork's render.yaml on conflicts — it holds our deploy config.
+          if git status --porcelain | grep -q '^UU render.yaml'; then
+            git checkout --ours render.yaml
+            git add render.yaml
+            git commit --no-edit -m "chore(sync): keep fork render.yaml on conflict" || true
+          fi
+
+      - name: Push to fork
+        if: steps.check.outputs.needs_update == 'true'
+        run: git push origin main
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Sync result" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.check.outputs.needs_update }}" = "true" ]; then
+            echo "✅ Fork updated and pushed. Render will auto-deploy shortly." >> "$GITHUB_STEP_SUMMARY"
+            echo "New HEAD: $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ℹ️ Already up to date with upstream. No changes pushed." >> "$GITHUB_STEP_SUMMARY"
+          fi

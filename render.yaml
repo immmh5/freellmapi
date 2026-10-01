@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: freellmapi
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/ping
+    envVars:
+      # 64-char hex key used to encrypt your provider API keys at rest.
+      # Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+      # Keep this stable — changing it makes existing encrypted keys undecryptable.
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: NODE_ENV
+        value: production
+      # Render sets PORT automatically; the Dockerfile defaults to 3001.
+      # The server binds 0.0.0.0/:: so Render's proxy can reach it.
+      - key: HOST
+        value: "::"
+      # Trust Render's reverse proxy so rate limiting and analytics see the
+      # real client IP instead of the proxy's. Render is a single trusted hop.
+      - key: TRUST_PROXY
+        value: "1"
+      # The dashboard is reachable from the internet on Render, so block
+      # private/loopback custom-provider URLs as a hardening measure.
+      - key: FREEAPI_BLOCK_PRIVATE_PROVIDER_URLS
+        value: "true"
