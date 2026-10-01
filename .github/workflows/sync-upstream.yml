@@ -49,20 +49,25 @@ jobs:
       - name: Check for updates
         id: check
         run: |
-          LOCAL=$(git rev-parse HEAD)
-          UPSTREAM=$(git rev-parse upstream/main)
-          echo "local=$LOCAL"
-          echo "upstream=$UPSTREAM"
-          if [ "$LOCAL" = "$UPSTREAM" ]; then
+          # Count commits reachable from upstream/main but NOT from our HEAD.
+          # The fork carries its own commits (render.yaml, this workflow), so a
+          # plain SHA comparison would always report "new commits" even when
+          # upstream has nothing new. rev-list answers the real question.
+          BEHIND=$(git rev-list --count HEAD..upstream/main || echo 0)
+          echo "local=$(git rev-parse --short HEAD)"
+          echo "upstream=$(git rev-parse --short upstream/main)"
+          echo "commits behind upstream: $BEHIND"
+          if [ "$BEHIND" -eq 0 ]; then
             if [ "${{ github.event.inputs.force }}" = "true" ]; then
-              echo "Already up to date, but force=true — pushing an empty commit to trigger a Render rebuild."
+              echo "Up to date, but force=true — pushing an empty commit to trigger a Render rebuild."
+              git commit --allow-empty -m "chore(sync): rerender [skip ci]" || true
               echo "needs_update=true" >> "$GITHUB_OUTPUT"
             else
               echo "Already up to date. Nothing to do."
               echo "needs_update=false" >> "$GITHUB_OUTPUT"
             fi
           else
-            echo "Upstream has new commits. Syncing."
+            echo "Upstream has $BEHIND new commit(s). Syncing."
             echo "needs_update=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -70,6 +75,13 @@ jobs:
         if: steps.check.outputs.needs_update == 'true'
         run: |
           set -e
+          # Nothing to merge when we're already current (only reachable via the
+          # force path, which already made its own empty commit above).
+          BEHIND=$(git rev-list --count HEAD..upstream/main || echo 0)
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "No upstream commits to merge; the force path already committed."
+            exit 0
+          fi
           # Merge upstream main. Use a merge commit so the fork keeps its own
           # history (render.yaml, this workflow) while pulling in upstream changes.
           git merge upstream/main --no-edit -m "chore(sync): merge upstream tashfeenahmed/freellmapi@$(git rev-parse --short upstream/main)"
@@ -80,6 +92,18 @@ jobs:
             git commit --no-edit -m "chore(sync): keep fork render.yaml on conflict" || true
           fi
 
+      - name: Record whether a merge happened
+        id: merged
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          BEFORE="${{ github.sha }}"
+          NOW=$(git rev-parse HEAD)
+          if [ "$BEFORE" != "$NOW" ]; then
+            echo "did_merge=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "did_merge=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Push to fork
         if: steps.check.outputs.needs_update == 'true'
         run: git push origin main
@@ -88,7 +112,7 @@ jobs:
         if: always()
         run: |
           echo "### Sync result" >> "$GITHUB_STEP_SUMMARY"
-          if [ "${{ steps.check.outputs.needs_update }}" = "true" ]; then
+          if [ "${{ steps.merged.outputs.did_merge }}" = "true" ]; then
             echo "✅ Fork updated and pushed. Render will auto-deploy shortly." >> "$GITHUB_STEP_SUMMARY"
             echo "New HEAD: $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
           else
